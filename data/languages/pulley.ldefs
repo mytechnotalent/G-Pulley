@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 Kevin Thomas
+  Language definitions for Wasmtime Pulley bytecode (pulley32 and pulley64).
+-->
+<language_definitions>
+  <language processor="Pulley"
+           endian="little"
+           size="32"
+           variant="default"
+           version="1.0"
+           slafile="pulley.sla"
+           processorspec="pulley.pspec"
+           id="Pulley:LE:32:default">
+    <description>Wasmtime Pulley Bytecode (32-bit)</description>
+    <compiler name="default" spec="pulley.cspec" id="default"/>
+    <external_name tool="gnu" name="pulley32"/>
+  </language>
+  <language processor="Pulley"
+           endian="little"
+           size="64"
+           variant="default"
+           version="1.0"
+           slafile="pulley64.sla"
+           processorspec="pulley.pspec"
+           id="Pulley:LE:64:default">
+    <description>Wasmtime Pulley Bytecode (64-bit)</description>
+    <compiler name="default" spec="pulley64.cspec" id="default"/>
+    <external_name tool="gnu" name="pulley64"/>
+  </language>
+</language_definitions>

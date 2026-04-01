@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 Kevin Thomas
+  Processor specification for Wasmtime Pulley bytecode.
+-->
+<processor_spec>
+  <programcounter register="pc"/>
+  <register_data>
+    <register name="xsp" group="General" />
+    <register name="fp"  group="General" />
+    <register name="lr"  group="General" />
+    <register name="x0"  group="General" />
+    <register name="x1"  group="General" />
+    <register name="x2"  group="General" />
+    <register name="x3"  group="General" />
+    <register name="x4"  group="General" />
+    <register name="x5"  group="General" />
+    <register name="x6"  group="General" />
+    <register name="x7"  group="General" />
+    <register name="x8"  group="General" />
+    <register name="x9"  group="General" />
+    <register name="x10" group="General" />
+    <register name="x11" group="General" />
+    <register name="x12" group="General" />
+    <register name="x13" group="General" />
+    <register name="x14" group="General" />
+    <register name="x15" group="General" />
+    <register name="x16" group="General" />
+    <register name="x17" group="General" />
+    <register name="x18" group="General" />
+    <register name="x19" group="General" />
+    <register name="x20" group="General" />
+    <register name="x21" group="General" />
+    <register name="x22" group="General" />
+    <register name="x23" group="General" />
+    <register name="x24" group="General" />
+    <register name="x25" group="General" />
+    <register name="x26" group="General" />
+    <register name="x27" group="General" />
+    <register name="x28" group="General" />
+    <register name="x29" group="General" />
+    <register name="spilltmp0" group="General" />
+    <register name="f0"  group="Float" />
+    <register name="f1"  group="Float" />
+    <register name="f2"  group="Float" />
+    <register name="f3"  group="Float" />
+    <register name="f4"  group="Float" />
+    <register name="f5"  group="Float" />
+    <register name="f6"  group="Float" />
+    <register name="f7"  group="Float" />
+    <register name="f8"  group="Float" />
+    <register name="f9"  group="Float" />
+    <register name="f10" group="Float" />
+    <register name="f11" group="Float" />
+    <register name="f12" group="Float" />
+    <register name="f13" group="Float" />
+    <register name="f14" group="Float" />
+    <register name="f15" group="Float" />
+    <register name="f16" group="Float" />
+    <register name="f17" group="Float" />
+    <register name="f18" group="Float" />
+    <register name="f19" group="Float" />
+    <register name="f20" group="Float" />
+    <register name="f21" group="Float" />
+    <register name="f22" group="Float" />
+    <register name="f23" group="Float" />
+    <register name="f24" group="Float" />
+    <register name="f25" group="Float" />
+    <register name="f26" group="Float" />
+    <register name="f27" group="Float" />
+    <register name="f28" group="Float" />
+    <register name="f29" group="Float" />
+    <register name="f30" group="Float" />
+    <register name="f31" group="Float" />
+  </register_data>
+  <default_symbols>
+    <symbol name="ENTRY" address="ram:0x0000" entry="true"/>
+  </default_symbols>
+</processor_spec>

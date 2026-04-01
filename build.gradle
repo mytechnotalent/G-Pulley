@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Kevin Thomas
+//
+// Gradle build for the G-Pulley Ghidra extension.
+// Builds a Ghidra processor module that disassembles and decompiles
+// Wasmtime Pulley bytecode from cwasm (compiled WebAssembly) blobs.
+
+apply plugin: 'java'
+
+// -----------------------------------------------------------------
+// Configure these paths for your Ghidra installation
+// -----------------------------------------------------------------
+
+// Set GHIDRA_INSTALL_DIR environment variable or edit this path:
+def ghidraInstallDir = System.env.GHIDRA_INSTALL_DIR ?: file("${System.getProperty('user.home')}/ghidra").absolutePath
+
+// Automatically find the Ghidra application properties to determine version
+def ghidraProps = new Properties()
+def propsFile = file("${ghidraInstallDir}/Ghidra/application.properties")
+if (propsFile.exists()) {
+    propsFile.withInputStream { ghidraProps.load(it) }
+}
+
+sourceCompatibility = 17
+targetCompatibility = 17
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/main/java']
+        }
+        resources {
+            srcDirs = ['data', 'src/main/resources']
+        }
+    }
+}
+
+// -----------------------------------------------------------------
+// Ghidra classpath — includes all JARs from the Ghidra installation
+// -----------------------------------------------------------------
+dependencies {
+    compileOnly fileTree(dir: "${ghidraInstallDir}/Ghidra/Framework", include: '**/*.jar')
+    compileOnly fileTree(dir: "${ghidraInstallDir}/Ghidra/Features", include: '**/*.jar')
+}
+
+// -----------------------------------------------------------------
+// Package the extension as a zip suitable for Ghidra's extension installer
+// -----------------------------------------------------------------
+task zipExtension(type: Zip) {
+    archiveBaseName = 'G-Pulley'
+    archiveVersion = '1.0'
+    from('.') {
+        include 'data/**'
+        include 'src/**'
+        include 'ghidra_scripts/**'
+        include 'docs/**'
+        include 'Module.manifest'
+        include 'extension.properties'
+        include 'build.gradle'
+        include 'README.md'
+    }
+    from(sourceSets.main.output) {
+        into 'lib'
+    }
+    into("G-Pulley")
+    destinationDirectory = file("${buildDir}/dist")
+}
+
+build.dependsOn zipExtension

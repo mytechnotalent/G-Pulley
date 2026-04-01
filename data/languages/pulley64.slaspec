@@ -1,0 +1,854 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (c) 2026 Kevin Thomas
+#
+# SLEIGH specification for Wasmtime Pulley bytecode ISA (v43.0.0)
+# Pulley is the portable interpreter backend for Wasmtime's AOT-compiled
+# WebAssembly components. This spec targets pulley64 (64-bit address space).
+
+define endian=little;
+define alignment=1;
+
+define space ram type=ram_space size=8 default;
+define space register type=register_space size=4;
+
+# ===================================================================
+# Registers
+# ===================================================================
+
+# General-purpose 64-bit registers (x0-x29, sp, spilltmp0)
+define register offset=0x000 size=8 [
+    x0  x1  x2  x3  x4  x5  x6  x7
+    x8  x9  x10 x11 x12 x13 x14 x15
+    x16 x17 x18 x19 x20 x21 x22 x23
+    x24 x25 x26 x27 x28 x29 xsp spilltmp0
+];
+
+# 32-bit sub-register aliases (low 32 bits of each xN)
+define register offset=0x000 size=4 [
+    x0l  _  x1l  _  x2l  _  x3l  _
+    x4l  _  x5l  _  x6l  _  x7l  _
+    x8l  _  x9l  _  x10l _  x11l _
+    x12l _  x13l _  x14l _  x15l _
+    x16l _  x17l _  x18l _  x19l _
+    x20l _  x21l _  x22l _  x23l _
+    x24l _  x25l _  x26l _  x27l _
+    x28l _  x29l _  xspl _  spilltmp0l _
+];
+
+# Float/vector registers (128-bit)
+define register offset=0x200 size=16 [
+    f0  f1  f2  f3  f4  f5  f6  f7
+    f8  f9  f10 f11 f12 f13 f14 f15
+    f16 f17 f18 f19 f20 f21 f22 f23
+    f24 f25 f26 f27 f28 f29 f30 f31
+];
+
+# Link register and frame pointer (64-bit)
+define register offset=0x400 size=8 [ lr fp ];
+
+# Contextreg for tracking instruction mode (unused but required)
+define register offset=0x410 size=4 [ contextreg ];
+
+# ===================================================================
+# Tokens
+# ===================================================================
+
+# User-defined pcode operations
+define pcodeop trap;
+
+# Primary opcode (1 byte)
+define token opbyte (8)
+    op = (0,7)
+;
+
+# Single register operand byte
+define token reg1tok (8)
+    r1 = (0,4)
+;
+
+define token reg2tok (8)
+    r2 = (0,4)
+;
+
+define token reg3tok (8)
+    r3 = (0,4)
+;
+
+define token reg4tok (8)
+    r4 = (0,4)
+;
+
+# BinaryOperands packed 16-bit token (3-register ALU)
+define token binop16 (16)
+    bop_dst  = (0,4)
+    bop_src1 = (5,9)
+    bop_src2 = (10,14)
+;
+
+# BinaryOperands with U6 immediate (shift ops)
+define token binop16u6 (16)
+    bou6_dst  = (0,4)
+    bou6_src  = (5,9)
+    bou6_imm  = (10,15)
+;
+
+# Immediate tokens
+define token imm8tok (8)
+    imm8  = (0,7)
+    simm8 = (0,7) signed
+;
+
+define token imm16tok (16)
+    imm16  = (0,15)
+    simm16 = (0,15) signed
+;
+
+define token imm32tok (32)
+    imm32  = (0,31)
+    simm32 = (0,31) signed
+;
+
+# Frame save/restore: frame size + register bitmask
+define token framesz16 (16)
+    frame_amt = (0,15)
+;
+
+define token regmask16 (16)
+    regmask = (0,15)
+;
+
+# Extended opcode (2 bytes after 0xDC sentinel)
+define token extop16 (16)
+    extop = (0,15)
+;
+
+# AddrG32 packed u32 token
+define token addrg32tok (32)
+    ag32_offset    = (0,15)
+    ag32_wasm_addr = (16,20)
+    ag32_bound     = (21,25)
+    ag32_base      = (26,30)
+;
+
+# ===================================================================
+# Attach register names to token fields
+# ===================================================================
+
+attach variables [ r1 r2 r3 r4 ] [
+    x0  x1  x2  x3  x4  x5  x6  x7
+    x8  x9  x10 x11 x12 x13 x14 x15
+    x16 x17 x18 x19 x20 x21 x22 x23
+    x24 x25 x26 x27 x28 x29 xsp spilltmp0
+];
+
+attach variables [ bop_dst bop_src1 bop_src2 ] [
+    x0  x1  x2  x3  x4  x5  x6  x7
+    x8  x9  x10 x11 x12 x13 x14 x15
+    x16 x17 x18 x19 x20 x21 x22 x23
+    x24 x25 x26 x27 x28 x29 xsp spilltmp0
+];
+
+attach variables [ bou6_dst bou6_src ] [
+    x0  x1  x2  x3  x4  x5  x6  x7
+    x8  x9  x10 x11 x12 x13 x14 x15
+    x16 x17 x18 x19 x20 x21 x22 x23
+    x24 x25 x26 x27 x28 x29 xsp spilltmp0
+];
+
+attach variables [ ag32_wasm_addr ag32_bound ag32_base ] [
+    x0  x1  x2  x3  x4  x5  x6  x7
+    x8  x9  x10 x11 x12 x13 x14 x15
+    x16 x17 x18 x19 x20 x21 x22 x23
+    x24 x25 x26 x27 x28 x29 xsp spilltmp0
+];
+
+# ===================================================================
+# Macros
+# ===================================================================
+
+macro push8(val) {
+    xsp = xsp - 8;
+    *:8 xsp = val;
+}
+
+macro pop8(dst) {
+    dst = *:8 xsp;
+    xsp = xsp + 8;
+}
+
+# ===================================================================
+# P-code address computation helpers
+# ===================================================================
+
+# PC-relative target computation for branches and calls
+rel: dest is simm32 [ dest = inst_start + simm32; ] { export *:8 dest; }
+
+# ===================================================================
+# Instructions
+# ===================================================================
+
+# -------------------------------------------------------------------
+# 0x00: nop
+# -------------------------------------------------------------------
+:nop is op=0x00 {
+}
+
+# -------------------------------------------------------------------
+# 0x01: ret
+# -------------------------------------------------------------------
+:ret is op=0x01 {
+    return [lr];
+}
+
+# -------------------------------------------------------------------
+# 0x02: call offset
+# -------------------------------------------------------------------
+:call rel is op=0x02; rel {
+    lr = inst_next;
+    call rel;
+}
+
+# -------------------------------------------------------------------
+# 0x03: call1 arg1, offset
+# -------------------------------------------------------------------
+:call1 r1, rel is op=0x03; r1; rel {
+    x0 = r1;
+    lr = inst_next;
+    call rel;
+}
+
+# -------------------------------------------------------------------
+# 0x04: call2 arg1, arg2, offset
+# -------------------------------------------------------------------
+:call2 r1, r2, rel is op=0x04; r1; r2; rel {
+    x0 = r1;
+    x1 = r2;
+    lr = inst_next;
+    call rel;
+}
+
+# -------------------------------------------------------------------
+# 0x05: call3 arg1, arg2, arg3, offset
+# -------------------------------------------------------------------
+:call3 r1, r2, r3, rel is op=0x05; r1; r2; r3; rel {
+    x0 = r1;
+    x1 = r2;
+    x2 = r3;
+    lr = inst_next;
+    call rel;
+}
+
+# -------------------------------------------------------------------
+# 0x06: call4 arg1, arg2, arg3, arg4, offset
+# -------------------------------------------------------------------
+:call4 r1, r2, r3, r4, rel is op=0x06; r1; r2; r3; r4; rel {
+    x0 = r1;
+    x1 = r2;
+    x2 = r3;
+    x3 = r4;
+    lr = inst_next;
+    call rel;
+}
+
+# -------------------------------------------------------------------
+# 0x07: call_indirect reg
+# -------------------------------------------------------------------
+:call_indirect r1 is op=0x07; r1 {
+    lr = inst_next;
+    local target:8 = r1;
+    call [target];
+}
+
+# -------------------------------------------------------------------
+# 0x08: jump offset
+# -------------------------------------------------------------------
+:jump rel is op=0x08; rel {
+    goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x0a: br_if32 cond, offset
+# -------------------------------------------------------------------
+:br_if32 r1, rel is op=0x0a; r1; rel {
+    local cond:4 = r1:4;
+    if (cond != 0) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x0b: br_if_not32 cond, offset
+# -------------------------------------------------------------------
+:br_if_not32 r1, rel is op=0x0b; r1; rel {
+    local cond:4 = r1:4;
+    if (cond == 0) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x0c: br_if_xeq32 a, b, offset
+# -------------------------------------------------------------------
+:br_if_xeq32 r1, r2, rel is op=0x0c; r1; r2; rel {
+    if (r1:4 == r2:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x0d: br_if_xneq32 a, b, offset
+# -------------------------------------------------------------------
+:br_if_xneq32 r1, r2, rel is op=0x0d; r1; r2; rel {
+    if (r1:4 != r2:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x10: br_if_xult32 a, b, offset
+# -------------------------------------------------------------------
+:br_if_xult32 r1, r2, rel is op=0x10; r1; r2; rel {
+    if (r1:4 < r2:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x11: br_if_xulteq32 a, b, offset
+# -------------------------------------------------------------------
+:br_if_xulteq32 r1, r2, rel is op=0x11; r1; r2; rel {
+    if (r1:4 <= r2:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x18: br_if_xeq32_i8 a, imm8, offset
+# -------------------------------------------------------------------
+:br_if_xeq32_i8 r1, "#"^simm8, rel is op=0x18; r1; simm8; rel {
+    local val:4 = sext(simm8:1);
+    if (r1:4 == val) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x1a: br_if_xneq32_i8 a, imm8, offset
+# -------------------------------------------------------------------
+:br_if_xneq32_i8 r1, "#"^simm8, rel is op=0x1a; r1; simm8; rel {
+    local val:4 = sext(simm8:1);
+    if (r1:4 != val) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x24: br_if_xult32_u8 a, u8, offset
+# -------------------------------------------------------------------
+:br_if_xult32_u8 r1, "#"^imm8, rel is op=0x24; r1; imm8; rel {
+    local val:4 = zext(imm8:1);
+    if (r1:4 < val) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x25: br_if_xult32_u32 a, u32, offset
+# -------------------------------------------------------------------
+:br_if_xult32_u32 r1, "#"^imm32, rel is op=0x25; r1; imm32; rel {
+    if (r1:4 < imm32:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x28: br_if_xugt32_u8 a, u8, offset
+# -------------------------------------------------------------------
+:br_if_xugt32_u8 r1, "#"^imm8, rel is op=0x28; r1; imm8; rel {
+    local val:4 = zext(imm8:1);
+    if (r1:4 > val) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x29: br_if_xugt32_u32 a, u32, offset
+# -------------------------------------------------------------------
+:br_if_xugt32_u32 r1, "#"^imm32, rel is op=0x29; r1; imm32; rel {
+    if (r1:4 > imm32:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x2a: br_if_xugteq32_u8 a, u8, offset
+# -------------------------------------------------------------------
+:br_if_xugteq32_u8 r1, "#"^imm8, rel is op=0x2a; r1; imm8; rel {
+    local val:4 = zext(imm8:1);
+    if (r1:4 >= val) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x2b: br_if_xugteq32_u32 a, u32, offset
+# -------------------------------------------------------------------
+:br_if_xugteq32_u32 r1, "#"^imm32, rel is op=0x2b; r1; imm32; rel {
+    if (r1:4 >= imm32:4) goto rel;
+}
+
+# -------------------------------------------------------------------
+# 0x41: xmov dst, src
+# -------------------------------------------------------------------
+:xmov r1, r2 is op=0x41; r1; r2 {
+    r1 = r2;
+}
+
+# -------------------------------------------------------------------
+# 0x42: xzero dst
+# -------------------------------------------------------------------
+:xzero r1 is op=0x42; r1 {
+    r1 = 0;
+}
+
+# -------------------------------------------------------------------
+# 0x43: xone dst
+# -------------------------------------------------------------------
+:xone r1 is op=0x43; r1 {
+    r1 = 1;
+}
+
+# -------------------------------------------------------------------
+# 0x44: xconst8 dst, imm8
+# -------------------------------------------------------------------
+:xconst8 r1, "#"^simm8 is op=0x44; r1; simm8 {
+    r1 = sext(simm8:1);
+}
+
+# -------------------------------------------------------------------
+# 0x45: xconst16 dst, imm16
+# -------------------------------------------------------------------
+:xconst16 r1, "#"^simm16 is op=0x45; r1; simm16 {
+    r1 = sext(simm16:2);
+}
+
+# -------------------------------------------------------------------
+# 0x46: xconst32 dst, imm32
+# -------------------------------------------------------------------
+:xconst32 r1, "#"^simm32 is op=0x46; r1; simm32 {
+    r1 = sext(simm32:4);
+}
+
+# -------------------------------------------------------------------
+# 0x48: xadd32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xadd32 bop_dst, bop_src1, bop_src2 is op=0x48; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 + bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0x49: xadd32_u8 dst, src, u8
+# -------------------------------------------------------------------
+:xadd32_u8 r1, r2, "#"^imm8 is op=0x49; r1; r2; imm8 {
+    local val:4 = zext(imm8:1);
+    r1 = zext(r2:4 + val);
+}
+
+# -------------------------------------------------------------------
+# 0x4a: xadd32_u32 dst, src, u32
+# -------------------------------------------------------------------
+:xadd32_u32 r1, r2, "#"^imm32 is op=0x4a; r1; r2; imm32 {
+    r1 = zext(r2:4 + imm32:4);
+}
+
+# -------------------------------------------------------------------
+# 0x50: xsub32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xsub32 bop_dst, bop_src1, bop_src2 is op=0x50; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 - bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0x51: xsub32_u8 dst, src, u8
+# -------------------------------------------------------------------
+:xsub32_u8 r1, r2, "#"^imm8 is op=0x51; r1; r2; imm8 {
+    local val:4 = zext(imm8:1);
+    r1 = zext(r2:4 - val);
+}
+
+# -------------------------------------------------------------------
+# 0x5e: xclz32 dst, src
+# -------------------------------------------------------------------
+:xclz32 r1, r2 is op=0x5e; r1; r2 {
+    local src:4 = r2:4;
+    local count:4 = 0;
+    local mask:4 = 0x80000000;
+    <loop>
+    if (count == 32) goto <done>;
+    if ((src & mask) != 0) goto <done>;
+    count = count + 1;
+    mask = mask >> 1;
+    goto <loop>;
+    <done>
+    r1 = zext(count);
+}
+
+# -------------------------------------------------------------------
+# 0x60: xctz32 dst, src
+# -------------------------------------------------------------------
+:xctz32 r1, r2 is op=0x60; r1; r2 {
+    local src:4 = r2:4;
+    local count:4 = 0;
+    <loop>
+    if (count == 32) goto <done>;
+    if ((src & 1) != 0) goto <done>;
+    count = count + 1;
+    src = src >> 1;
+    goto <loop>;
+    <done>
+    r1 = zext(count);
+}
+
+# -------------------------------------------------------------------
+# 0x66: xshl32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xshl32 bop_dst, bop_src1, bop_src2 is op=0x66; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 << (bop_src2:4 & 0x1f));
+}
+
+# -------------------------------------------------------------------
+# 0x68: xshr32_u (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xshr32_u bop_dst, bop_src1, bop_src2 is op=0x68; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 >> (bop_src2:4 & 0x1f));
+}
+
+# -------------------------------------------------------------------
+# 0x6c: xshl32_u6 (BinaryOperands w/ U6 immediate)
+# -------------------------------------------------------------------
+:xshl32_u6 bou6_dst, bou6_src, "#"^bou6_imm is op=0x6c; bou6_dst & bou6_src & bou6_imm {
+    bou6_dst = zext(bou6_src:4 << bou6_imm);
+}
+
+# -------------------------------------------------------------------
+# 0x6e: xshr32_u_u6 (BinaryOperands w/ U6 immediate)
+# -------------------------------------------------------------------
+:xshr32_u_u6 bou6_dst, bou6_src, "#"^bou6_imm is op=0x6e; bou6_dst & bou6_src & bou6_imm {
+    bou6_dst = zext(bou6_src:4 >> bou6_imm);
+}
+
+# -------------------------------------------------------------------
+# 0x72: xneg32 dst, src
+# -------------------------------------------------------------------
+:xneg32 r1, r2 is op=0x72; r1; r2 {
+    r1 = zext(0:4 - r2:4);
+}
+
+# -------------------------------------------------------------------
+# 0x7a: xeq32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xeq32 bop_dst, bop_src1, bop_src2 is op=0x7a; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 == bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0x7e: xult32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xult32 bop_dst, bop_src1, bop_src2 is op=0x7e; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 < bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0x84: xload32le_o32 dst, base, offset
+# -------------------------------------------------------------------
+:xload32le_o32 r1, r2, "#"^simm32 is op=0x84; r1; r2; simm32 {
+    local addr:8 = r2 + sext(simm32:4);
+    r1 = zext(*:4 addr);
+}
+
+# -------------------------------------------------------------------
+# 0x88: xstore32le_o32 base, offset, src
+# -------------------------------------------------------------------
+:xstore32le_o32 r1, "#"^simm32, r2 is op=0x88; r1; simm32; r2 {
+    local addr:8 = r1 + sext(simm32:4);
+    *:4 addr = r2:4;
+}
+
+# -------------------------------------------------------------------
+# 0x8a: xload8_u32_z dst, base, offset (zero-extend byte)
+# -------------------------------------------------------------------
+:xload8_u32_z r1, r2, "#"^simm32 is op=0x8a; r1; r2; simm32 {
+    local addr:8 = r2 + sext(simm32:4);
+    r1 = zext(*:1 addr);
+}
+
+# -------------------------------------------------------------------
+# 0x8e: xload32le_z dst, base, offset
+# -------------------------------------------------------------------
+:xload32le_z r1, r2, "#"^simm32 is op=0x8e; r1; r2; simm32 {
+    local addr:8 = r2 + sext(simm32:4);
+    r1 = zext(*:4 addr);
+}
+
+# -------------------------------------------------------------------
+# 0x90: xstore8_z base, offset, src
+# -------------------------------------------------------------------
+:xstore8_z r1, "#"^simm32, r2 is op=0x90; r1; simm32; r2 {
+    local addr:8 = r1 + sext(simm32:4);
+    *:1 addr = r2:1;
+}
+
+# -------------------------------------------------------------------
+# 0x92: xstore32le_z base, offset, src
+# -------------------------------------------------------------------
+:xstore32le_z r1, "#"^simm32, r2 is op=0x92; r1; simm32; r2 {
+    local addr:8 = r1 + sext(simm32:4);
+    *:4 addr = r2:4;
+}
+
+# -------------------------------------------------------------------
+# 0x98: xload32le_g32 dst, AddrG32 (guarded load)
+# -------------------------------------------------------------------
+:xload32le_g32 r1, [ag32_base, ag32_bound, ag32_wasm_addr, "#"^ag32_offset] is op=0x98; r1; ag32_offset & ag32_wasm_addr & ag32_bound & ag32_base {
+    local off:8 = zext(ag32_offset:2);
+    local wasm_ptr:8 = ag32_wasm_addr + off;
+    local addr:8 = ag32_base + wasm_ptr;
+    r1 = zext(*:4 addr);
+}
+
+# -------------------------------------------------------------------
+# 0x9c: xstore32le_g32 AddrG32, src (guarded store)
+# -------------------------------------------------------------------
+:xstore32le_g32 [ag32_base, ag32_bound, ag32_wasm_addr, "#"^ag32_offset], r1 is op=0x9c; ag32_offset & ag32_wasm_addr & ag32_bound & ag32_base; r1 {
+    local off:8 = zext(ag32_offset:2);
+    local wasm_ptr:8 = ag32_wasm_addr + off;
+    local addr:8 = ag32_base + wasm_ptr;
+    *:4 addr = r1:4;
+}
+
+# -------------------------------------------------------------------
+# 0xa8: push_frame
+# -------------------------------------------------------------------
+:push_frame is op=0xa8 {
+    push8(lr);
+    push8(fp);
+    fp = xsp;
+}
+
+# -------------------------------------------------------------------
+# 0xa9: pop_frame
+# -------------------------------------------------------------------
+:pop_frame is op=0xa9 {
+    xsp = fp;
+    pop8(fp);
+    pop8(lr);
+}
+
+# -------------------------------------------------------------------
+# 0xaa: push_frame_save frame_amt, regmask
+# -------------------------------------------------------------------
+:push_frame_save "#"^frame_amt, "#"^regmask is op=0xaa; frame_amt; regmask {
+    push8(lr);
+    push8(fp);
+    fp = xsp;
+    xsp = xsp - zext(frame_amt:2);
+}
+
+# -------------------------------------------------------------------
+# 0xab: pop_frame_restore frame_amt, regmask
+# -------------------------------------------------------------------
+:pop_frame_restore "#"^frame_amt, "#"^regmask is op=0xab; frame_amt; regmask {
+    xsp = xsp + zext(frame_amt:2);
+    xsp = fp;
+    pop8(fp);
+    pop8(lr);
+}
+
+# -------------------------------------------------------------------
+# 0xb0: zext32 dst, src (zero-extend 32 to 64)
+# -------------------------------------------------------------------
+:zext32 r1, r2 is op=0xb0; r1; r2 {
+    r1 = zext(r2:4);
+}
+
+# -------------------------------------------------------------------
+# 0xbe: xband32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xband32 bop_dst, bop_src1, bop_src2 is op=0xbe; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 & bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0xbf: xband32_s8 dst, src, imm8
+# -------------------------------------------------------------------
+:xband32_s8 r1, r2, "#"^simm8 is op=0xbf; r1; r2; simm8 {
+    local val:4 = sext(simm8:1);
+    r1 = zext(r2:4 & val);
+}
+
+# -------------------------------------------------------------------
+# 0xc4: xbor32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xbor32 bop_dst, bop_src1, bop_src2 is op=0xc4; bop_dst & bop_src1 & bop_src2 {
+    bop_dst = zext(bop_src1:4 | bop_src2:4);
+}
+
+# -------------------------------------------------------------------
+# 0xc5: xbor32_s8 dst, src, imm8
+# -------------------------------------------------------------------
+:xbor32_s8 r1, r2, "#"^simm8 is op=0xc5; r1; r2; simm8 {
+    local val:4 = sext(simm8:1);
+    r1 = zext(r2:4 | val);
+}
+
+# -------------------------------------------------------------------
+# 0xcb: xbxor32_s8 dst, src, imm8
+# -------------------------------------------------------------------
+:xbxor32_s8 r1, r2, "#"^simm8 is op=0xcb; r1; r2; simm8 {
+    local val:4 = sext(simm8:1);
+    r1 = zext(r2:4 ^ val);
+}
+
+# -------------------------------------------------------------------
+# 0xd2: xmin32_u (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xmin32_u bop_dst, bop_src1, bop_src2 is op=0xd2; bop_dst & bop_src1 & bop_src2 {
+    local a:4 = bop_src1:4;
+    local b:4 = bop_src2:4;
+    local result:4 = a;
+    if (a < b) goto <done>;
+    result = b;
+    <done>
+    bop_dst = zext(result);
+}
+
+# -------------------------------------------------------------------
+# 0xd4: xmax32_u (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xmax32_u bop_dst, bop_src1, bop_src2 is op=0xd4; bop_dst & bop_src1 & bop_src2 {
+    local a:4 = bop_src1:4;
+    local b:4 = bop_src2:4;
+    local result:4 = a;
+    if (a > b) goto <done>;
+    result = b;
+    <done>
+    bop_dst = zext(result);
+}
+
+# -------------------------------------------------------------------
+# 0xda: xselect32 dst, cond, if_nonzero, if_zero
+# -------------------------------------------------------------------
+:xselect32 r1, r2, r3, r4 is op=0xda; r1; r2; r3; r4 {
+    if (r2:4 != 0) goto <nonzero>;
+    r1 = r4;
+    goto <done>;
+    <nonzero>
+    r1 = r3;
+    <done>
+}
+
+# -------------------------------------------------------------------
+# 0x86: xload64le_o32 dst, base, offset
+# -------------------------------------------------------------------
+:xload64le_o32 r1, r2, "#"^simm32 is op=0x86; r1; r2; simm32 {
+    local addr:8 = r2 + sext(simm32:4);
+    r1 = *:8 addr;
+}
+
+# -------------------------------------------------------------------
+# 0x89: xstore64le_o32 base, offset, src
+# -------------------------------------------------------------------
+:xstore64le_o32 r1, "#"^simm32, r2 is op=0x89; r1; simm32; r2 {
+    local addr:8 = r1 + sext(simm32:4);
+    *:8 addr = r2;
+}
+
+# -------------------------------------------------------------------
+# 0xb4: zext8 dst, src (zero-extend 8 to 64)
+# -------------------------------------------------------------------
+:zext8 r1, r2 is op=0xb4; r1; r2 {
+    r1 = zext(r2:1);
+}
+
+# -------------------------------------------------------------------
+# 0xc1: xbnot32 dst, src
+# -------------------------------------------------------------------
+:xbnot32 r1, r2 is op=0xc1; r1; r2 {
+    r1 = zext(~r2:4);
+}
+
+# -------------------------------------------------------------------
+# 0xc8: xrotl32 (BinaryOperands packed)
+# -------------------------------------------------------------------
+:xrotl32 bop_dst, bop_src1, bop_src2 is op=0xc8; bop_dst & bop_src1 & bop_src2 {
+    local val:4 = bop_src1:4;
+    local amt:4 = bop_src2:4 & 0x1f;
+    bop_dst = zext((val << amt) | (val >> (32 - amt)));
+}
+
+# -------------------------------------------------------------------
+# 0xcc: xband32_s32 dst, src, imm32
+# -------------------------------------------------------------------
+:xband32_s32 r1, r2, "#"^simm32 is op=0xcc; r1; r2; simm32 {
+    r1 = zext(r2:4 & simm32:4);
+}
+
+# -------------------------------------------------------------------
+# 0x9a: xload64le_z dst, base, offset
+# -------------------------------------------------------------------
+:xload64le_z r1, r2, "#"^simm32 is op=0x9a; r1; r2; simm32 {
+    local addr:8 = r2 + sext(simm32:4);
+    r1 = *:8 addr;
+}
+
+# -------------------------------------------------------------------
+# 0x9e: xstore64le_g32 AddrG32, src (guarded 64-bit store)
+# -------------------------------------------------------------------
+:xstore64le_g32 [ag32_base, ag32_bound, ag32_wasm_addr, "#"^ag32_offset], r1 is op=0x9e; ag32_offset & ag32_wasm_addr & ag32_bound & ag32_base; r1 {
+    local off:8 = zext(ag32_offset:2);
+    local wasm_ptr:8 = ag32_wasm_addr + off;
+    local addr:8 = ag32_base + wasm_ptr;
+    *:8 addr = r1;
+}
+
+# -------------------------------------------------------------------
+# 0x9f: xload32le_g32bne (guarded load with bounds-not-equal check)
+# -------------------------------------------------------------------
+:xload32le_g32bne r1, [ag32_base, ag32_bound, ag32_wasm_addr, "#"^ag32_offset] is op=0x9f; r1; ag32_offset & ag32_wasm_addr & ag32_bound & ag32_base {
+    local off:8 = zext(ag32_offset:2);
+    local wasm_ptr:8 = ag32_wasm_addr + off;
+    local addr:8 = ag32_base + wasm_ptr;
+    r1 = zext(*:4 addr);
+}
+
+# ===================================================================
+# Extended Opcodes (0xDC prefix)
+# ===================================================================
+
+# -------------------------------------------------------------------
+# Extended 0x0000: trap
+# -------------------------------------------------------------------
+:trap is op=0xdc; extop=0x0000 {
+    local trap_code:4 = 0;
+    trap(trap_code);
+}
+
+# -------------------------------------------------------------------
+# Extended 0x0001: call_indirect_host id
+# -------------------------------------------------------------------
+:call_indirect_host "#"^imm8 is op=0xdc; extop=0x0001; imm8 {
+    local host_id:4 = zext(imm8:1);
+    lr = inst_next;
+    call [host_id];
+}
+
+# -------------------------------------------------------------------
+# Extended 0x0002: xpcadd dst, offset
+# -------------------------------------------------------------------
+:xpcadd r1, rel is op=0xdc; extop=0x0002; r1; rel {
+    r1 = rel;
+}
+
+# -------------------------------------------------------------------
+# Extended 0x0003: xmov_fp dst
+# -------------------------------------------------------------------
+:xmov_fp r1 is op=0xdc; extop=0x0003; r1 {
+    r1 = fp;
+}
+
+# -------------------------------------------------------------------
+# Extended 0x0004: xmov_lr dst
+# -------------------------------------------------------------------
+:xmov_lr r1 is op=0xdc; extop=0x0004; r1 {
+    r1 = lr;
+}
+
+# -------------------------------------------------------------------
+# Extended 0x000b: profile imm32
+# -------------------------------------------------------------------
+:profile "#"^simm32 is op=0xdc; extop=0x000b; simm32 {
+}
+
+# ===================================================================
+# Catch-all for undecoded opcodes
+# ===================================================================
+
+:undecoded_op imm8 is op [ imm8 = op; ] {
+    local bad:4 = zext(imm8:1);
+    trap(bad);
+}
