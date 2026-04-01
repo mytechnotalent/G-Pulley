@@ -114,26 +114,26 @@ Guarded memory access: `address = heap_base + wasm_addr + offset`, bounds-checke
 
 ```
 G-Pulley/
-├── README.md                           # This file
-├── extension.properties                # Ghidra extension metadata
-├── Module.manifest                     # Module class: PROCESSOR
-├── build.gradle                        # Gradle build (compile + zip)
+├── README.md                        # This file
+├── extension.properties             # Ghidra extension metadata
+├── Module.manifest                  # Module class: PROCESSOR
+├── build.gradle                     # Gradle build (compile + zip)
 ├── data/
 │   └── languages/
-│       ├── pulley.slaspec              # SLEIGH processor specification — pulley32
-│       ├── pulley64.slaspec            # SLEIGH processor specification — pulley64
-│       ├── pulley.ldefs                # Language definitions (32-bit and 64-bit)
-│       ├── pulley.pspec                # Processor spec (PC, register groups)
-│       ├── pulley.cspec                # Compiler spec — pulley32 (pointer_size=4)
-│       ├── pulley64.cspec              # Compiler spec — pulley64 (pointer_size=8)
-│       └── pulley.opinion              # Format opinion
+│       ├── pulley.slaspec           # SLEIGH processor specification — pulley32
+│       ├── pulley64.slaspec         # SLEIGH processor specification — pulley64
+│       ├── pulley.ldefs             # Language definitions (32-bit and 64-bit)
+│       ├── pulley.pspec             # Processor spec (PC, register groups)
+│       ├── pulley.cspec             # Compiler spec — pulley32 (pointer_size=4)
+│       ├── pulley64.cspec           # Compiler spec — pulley64 (pointer_size=8)
+│       └── pulley.opinion           # Format opinion
 ├── src/
 │   └── main/java/gpulley/
-│       ├── PulleyCwasmLoader.java      # ELF loader — imports cwasm into Ghidra
-│       └── PulleyCwasmAnalyzer.java    # Post-load analyzer — discovers functions
+│       ├── PulleyCwasmLoader.java   # ELF loader — imports cwasm into Ghidra
+│       └── PulleyCwasmAnalyzer.java # Post-load analyzer — discovers functions
 ├── ghidra_scripts/
-│   └── ExtractCwasmBlob.java           # Script: extract cwasm from ARM ELF
-└── docs/                               # (reserved for additional documentation)
+│   └── ExtractCwasmBlob.java        # Script: extract cwasm from ARM ELF
+└── docs/                            # (reserved for additional documentation)
 ```
 
 ### Component Descriptions
