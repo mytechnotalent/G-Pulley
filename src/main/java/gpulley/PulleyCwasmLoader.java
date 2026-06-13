@@ -1,21 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Thomas
-//
-// Ghidra loader for Wasmtime cwasm (compiled WebAssembly) files.
-//
-// Handles two scenarios:
-//   1. Standalone cwasm ELF—an ELF64 targeting pulley32-unknown-unknown-elf
-//      produced by `wasmtime compile --target pulley32-...`. The .text section
-//      contains raw Pulley bytecode. Symbol tables (if present) provide
-//      function names and boundaries.
-//
-//   2. Embedded cwasm blob inside an ARM ELF—an RP2350 firmware binary where
-//      the cwasm is stored as a const byte array in .rodata. The loader
-//      searches for the ELF magic (0x7f "ELF") inside .rodata, validates the
-//      inner ELF header, then extracts the Pulley .text section from it.
-//
-// In both cases the extracted Pulley bytecode is loaded into Ghidra's
-// address space for disassembly with the SLEIGH spec.
 
 package gpulley;
 
@@ -43,33 +27,18 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
 /// Ghidra loader that imports Pulley bytecode from cwasm ELF files.
+/// Handles standalone cwasm ELF targeting pulley32-unknown-unknown-elf
+/// and embedded cwasm blobs inside ARM ELF firmware.
 public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
 
-    /// ELF magic bytes: 0x7f 'E' 'L' 'F'.
     private static final byte[] ELF_MAGIC = { 0x7f, 0x45, 0x4c, 0x46 };
-
-    /// ELF class for 64-bit (ELFCLASS64).
     private static final int ELFCLASS64 = 2;
-
-    /// ELF data encoding for little-endian (ELFDATA2LSB).
     private static final int ELFDATA2LSB = 1;
-
-    /// ELF machine type for EM_RISCV (Pulley cwasm uses this).
     private static final int EM_RISCV = 243;
-
-    /// ELF OS/ABI byte identifying Pulley (0xC8 = 200).
     private static final int ELFOSABI_PULLEY = 200;
-
-    /// ELF machine type for ARM (RP2350 firmware).
     private static final int EM_ARM = 40;
-
-    /// ELF section type SHT_PROGBITS.
     private static final int SHT_PROGBITS = 1;
-
-    /// ELF section type SHT_SYMTAB.
     private static final int SHT_SYMTAB = 2;
-
-    /// ELF section type SHT_STRTAB.
     private static final int SHT_STRTAB = 3;
 
     /// Returns the human-readable name of this loader.
@@ -79,8 +48,6 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
     }
 
     /// Determines if the file can be loaded as Pulley bytecode.
-    /// Accepts either a Pulley ELF directly or an ARM ELF containing an
-    /// embedded cwasm blob.
     @Override
     public Collection<LoadSpec> findSupportedLoadSpecs(ByteProvider provider) throws IOException {
         List<LoadSpec> loadSpecs = new ArrayList<>();
@@ -174,9 +141,6 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
     }
 
     /// Searches for an embedded cwasm ELF inside an ARM firmware binary.
-    /// Scans for the ELF magic (0x7f ELF) and validates the inner header
-    /// targets EM_NONE (Pulley) with ELFCLASS64.
-    /// Returns the offset of the embedded ELF, or -1 if not found.
     private int findEmbeddedCwasmOffset(byte[] data) {
         for (int i = 0; i <= data.length - 64; i++) {
             if (data[i] == ELF_MAGIC[0] && data[i + 1] == ELF_MAGIC[1] &&
@@ -198,9 +162,7 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
         return -1;
     }
 
-    /// Extracts the cwasm ELF bytes. If the input is already a Pulley ELF,
-    /// returns it directly. If it's an ARM ELF with an embedded cwasm blob,
-    /// extracts and returns just the inner ELF.
+    /// Extracts the cwasm ELF bytes.
     private byte[] extractCwasmElf(byte[] fileBytes) {
         if (fileBytes.length < 16 || !matchesMagic(fileBytes)) {
             return null;
@@ -219,8 +181,6 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
     }
 
     /// Parses the cwasm ELF64 and loads sections into Ghidra.
-    /// Extracts .text (Pulley bytecode) and applies any symbols found
-    /// in the symbol table for function boundary detection.
     private void loadCwasmSections(byte[] elf, FlatProgramAPI api, Program program,
             MessageLog log, TaskMonitor monitor) throws IOException {
         if (elf.length < 64) {
@@ -308,8 +268,6 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
     }
 
     /// Applies ELF symbols from the symbol table to the Ghidra program.
-    /// Creates function labels for each STT_FUNC symbol and marks
-    /// function entry points for the decompiler.
     private void applySymbols(byte[] elf, long symtabOff, long symtabSize,
             int symtabEntSize, long strtabOff, FlatProgramAPI api,
             Program program, MessageLog log) {
@@ -355,7 +313,7 @@ public class PulleyCwasmLoader extends AbstractLibrarySupportLoader {
         return new ArrayList<>();
     }
 
-    /// Validates the user's option choices (no custom options currently).
+    /// Validates the user's option choices.
     @Override
     public String validateOptions(ByteProvider provider, LoadSpec loadSpec,
             List<Option> options, Program program) {

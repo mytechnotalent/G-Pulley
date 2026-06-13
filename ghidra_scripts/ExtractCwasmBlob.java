@@ -1,45 +1,35 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Thomas
-//
-// Ghidra script: Extract a cwasm (compiled WebAssembly) blob from an
-// already-loaded ARM ELF binary (e.g., RP2350 firmware).
-//
-// Usage:
-//   1. Open the ARM ELF firmware in Ghidra normally (with the ARM processor).
-//   2. Run this script from Script Manager.
-//   3. The script scans all memory blocks for ELF64 magic with EM_NONE,
-//      extracts the embedded cwasm ELF, and saves it to a file.
-//   4. The saved file can then be imported into a separate Ghidra project
-//      using the "Pulley Cwasm Loader" for full Pulley disassembly.
-//
-// This is useful when you want to analyze the ARM firmware and the
-// Pulley bytecode in separate Ghidra windows side-by-side.
-//
-// @category Analysis
-// @keybinding
-// @menupath Tools.Extract Cwasm Blob
-// @toolbar
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.*;
 import ghidra.program.model.mem.*;
-
 import java.io.*;
 import java.util.Arrays;
 
-/// Script that extracts an embedded cwasm ELF from ARM firmware.
+/// Ghidra script: Extract a cwasm (compiled WebAssembly) blob from an
+/// already-loaded ARM ELF binary (e.g., RP2350 firmware).
+///
+/// Usage:
+///   1. Open the ARM ELF firmware in Ghidra normally (with the ARM processor).
+///   2. Run this script from Script Manager.
+///   3. The script scans all memory blocks for ELF64 magic with EM_NONE,
+///      extracts the embedded cwasm ELF, and saves it to a file.
+///   4. The saved file can then be imported into a separate Ghidra project
+///      using the "Pulley Cwasm Loader" for full Pulley disassembly.
+///
+/// This is useful when you want to analyze the ARM firmware and the
+/// Pulley bytecode in separate Ghidra windows side-by-side.
+///
+/// @category Analysis
+/// @keybinding
+/// @menupath Tools.Extract Cwasm Blob
+/// @toolbar
 public class ExtractCwasmBlob extends GhidraScript {
 
-    /// ELF magic bytes: 0x7f 'E' 'L' 'F'.
     private static final byte[] ELF_MAGIC = { 0x7f, 0x45, 0x4c, 0x46 };
-
-    /// ELF class for 64-bit (ELFCLASS64).
     private static final int ELFCLASS64 = 2;
-
-    /// ELF data encoding for little-endian (ELFDATA2LSB).
     private static final int ELFDATA2LSB = 1;
-
-    /// ELF machine type for EM_NONE (Pulley uses this).
     private static final int EM_NONE = 0;
 
     /// Runs the cwasm extraction script.
@@ -84,7 +74,6 @@ public class ExtractCwasmBlob extends GhidraScript {
     }
 
     /// Searches a byte array for an embedded ELF64 + EM_NONE header.
-    /// Returns the offset, or -1 if not found.
     private int findCwasmElf(byte[] data) {
         for (int i = 0; i <= data.length - 64; i++) {
             if (data[i] != ELF_MAGIC[0] || data[i + 1] != ELF_MAGIC[1] ||
@@ -104,9 +93,7 @@ public class ExtractCwasmBlob extends GhidraScript {
         return -1;
     }
 
-    /// Determines the total size of the ELF64 file at the given offset
-    /// by reading the section header table position and computing the
-    /// maximum extent. Returns -1 on error.
+    /// Determines the total size of the ELF64 file at the given offset.
     private long determineCwasmElfSize(byte[] data, int elfStart) {
         if (elfStart + 64 > data.length) {
             return -1;

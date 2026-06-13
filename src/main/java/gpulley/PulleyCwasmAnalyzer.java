@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Kevin Thomas
-//
-// Post-load analyzer for Pulley bytecode in Ghidra.
-//
-// After the loader imports the Pulley .text section, this analyzer:
-//   1. Scans for `call` instructions and creates function entry points
-//      at each call target — essential for stripped binaries with no
-//      symbol table.
-//   2. Identifies `push_frame_save` prologues as function boundaries
-//      (Pulley functions almost always begin with push_frame_save).
-//   3. Marks `call_indirect_host` sites with host-import annotations
-//      so the user can identify WASI/host-function call sites.
-//   4. Tags `trap` instructions as non-returning for better decompilation.
 
 package gpulley;
 
@@ -37,34 +25,15 @@ import ghidra.util.task.TaskMonitor;
 /// in Pulley bytecode loaded from cwasm files.
 public class PulleyCwasmAnalyzer extends AbstractAnalyzer {
 
-    /// Opcode byte for `call` (PC-relative, 5 bytes total).
     private static final int OP_CALL = 0x02;
-
-    /// Opcode byte for `call2` (2 args + PC-relative, 7 bytes).
     private static final int OP_CALL2 = 0x04;
-
-    /// Opcode byte for `call3` (3 args + PC-relative, 8 bytes).
     private static final int OP_CALL3 = 0x05;
-
-    /// Opcode byte for `call4` (4 args + PC-relative, 9 bytes).
     private static final int OP_CALL4 = 0x06;
-
-    /// Opcode byte for `push_frame_save` (5 bytes total).
     private static final int OP_PUSH_FRAME_SAVE = 0xaa;
-
-    /// Opcode byte for `push_frame` (1 byte).
     private static final int OP_PUSH_FRAME = 0xa8;
-
-    /// Opcode byte for `ret` (1 byte).
     private static final int OP_RET = 0x01;
-
-    /// Opcode byte for extended opcode sentinel.
     private static final int OP_EXTENDED = 0xdc;
-
-    /// Extended opcode for `trap` (2-byte extended = 0x0000).
     private static final int EXTOP_TRAP = 0x0000;
-
-    /// Extended opcode for `call_indirect_host` (2-byte extended = 0x0001).
     private static final int EXTOP_CALL_INDIRECT_HOST = 0x0001;
 
     /// Constructs the Pulley cwasm analyzer.
@@ -126,8 +95,7 @@ public class PulleyCwasmAnalyzer extends AbstractAnalyzer {
         return true;
     }
 
-    /// Disassembles the entire address set by finding each undefined
-    /// gap and launching one DisassembleCommand per gap.
+    /// Disassembles the entire address set by finding each undefined gap.
     private void disassembleAll(Program program, AddressSetView set,
             TaskMonitor monitor, MessageLog log) {
         Listing listing = program.getListing();
@@ -144,9 +112,7 @@ public class PulleyCwasmAnalyzer extends AbstractAnalyzer {
         }
     }
 
-    /// Ensures disassembly at the address, then creates a function if
-    /// one does not already exist.
-    /// Returns 1 if a new function was created, 0 otherwise.
+    /// Ensures disassembly at the address, then creates a function.
     private int tryCreateFunction(Program program, Address addr, MessageLog log) {
         if (program.getListing().getInstructionAt(addr) == null) {
             DisassembleCommand disCmd = new DisassembleCommand(addr, null, true);
@@ -160,11 +126,7 @@ public class PulleyCwasmAnalyzer extends AbstractAnalyzer {
         return (program.getListing().getFunctionAt(addr) != null) ? 1 : 0;
     }
 
-    /// Handles a call instruction by resolving its target and creating
-    /// a function at the destination address.
-    /// The argCount parameter indicates how many register-argument bytes
-    /// precede the 4-byte PC-relative offset.
-    /// Returns 1 if a new function was created at the call target, 0 otherwise.
+    /// Handles a call instruction by resolving its target and creating a function.
     private int handleCallInstruction(Memory memory, Program program, Address addr,
             int argCount, MessageLog log) throws MemoryAccessException {
         int offsetPos = 1 + argCount;
@@ -174,10 +136,7 @@ public class PulleyCwasmAnalyzer extends AbstractAnalyzer {
         return tryCreateFunction(program, target, log);
     }
 
-    /// Handles an extended opcode instruction (0xDC sentinel).
-    /// Annotates `call_indirect_host` with a plate comment showing
-    /// the host function ID, and marks `trap` as non-returning.
-    /// Returns 1 if a host call was annotated, 0 otherwise.
+    /// Handles an extended opcode instruction.
     private int handleExtendedOp(Memory memory, Program program, Address addr,
             MessageLog log) throws MemoryAccessException {
         int extOp = readU16LE(memory, addr.add(1));
