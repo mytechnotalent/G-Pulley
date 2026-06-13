@@ -21,8 +21,10 @@ if (propsFile.exists()) {
     propsFile.withInputStream { ghidraProps.load(it) }
 }
 
-sourceCompatibility = 17
-targetCompatibility = 17
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
 
 sourceSets {
     main {

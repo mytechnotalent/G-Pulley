@@ -161,7 +161,13 @@ G-Pulley/
 - Ghidra 11.x or later
 - Java 17+
 
-### Option A: Build with Gradle
+### Option A: Install Pre-built Extension (Recommended)
+
+1. Download the pre-built `G-Pulley-1.0.zip` directly from the root of this repository.
+2. In Ghidra: **File -> Install Extensions -> Add (+)** -> select the zip file.
+3. Restart Ghidra.
+
+### Option B: Build with Gradle
 
 ```sh
 cd G-Pulley
